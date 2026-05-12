@@ -1,6 +1,8 @@
-[gd_scene load_steps=2 format=3 uid="uid://cmain000001"]
+[gd_scene load_steps=4 format=3 uid="uid://cmain000001"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/game_camera.gd" id="2_camera"]
+[ext_resource type="Script" path="res://scripts/selection_box.gd" id="3_selbox"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -8,4 +10,10 @@ script = ExtResource("1_main")
 [node name="Units" type="Node2D" parent="."]
 
 [node name="Camera2D" type="Camera2D" parent="."]
-position = Vector2(640, 448)
+script = ExtResource("2_camera")
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+layer = 10
+
+[node name="SelectionBox" type="Node2D" parent="CanvasLayer"]
+script = ExtResource("3_selbox")
