@@ -15,6 +15,10 @@ run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
+[autoload]
+
+NetworkManager="*res://scripts/network_manager.gd"
+
 [dotnet]
 
 project/assembly_name="roguelike_rts"
@@ -22,10 +26,6 @@ project/assembly_name="roguelike_rts"
 [physics]
 
 3d/physics_engine="Jolt Physics"
-
-[autoload]
-
-NetworkManager="*res://scripts/network_manager.gd"
 
 [rendering]
 

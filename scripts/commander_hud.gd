@@ -80,10 +80,16 @@ func _make_button(b: Dictionary) -> Control:
 	btn.add_child(vbox)
 
 	var icon_wrap := CenterContainer.new()
-	var icon := ColorRect.new()
-	icon.custom_minimum_size = Vector2(58, 58)
-	icon.color = b["color"].darkened(0.55) if locked else b["color"].darkened(0.25)
-	icon_wrap.add_child(icon)
+	if b["name"] == "Metal\nExtractor":
+		var icon := preload("res://scripts/resource_icon.gd").new()
+		icon.custom_minimum_size = Vector2(58, 58)
+		icon.is_locked = locked
+		icon_wrap.add_child(icon)
+	else:
+		var icon := ColorRect.new()
+		icon.custom_minimum_size = Vector2(58, 58)
+		icon.color = b["color"].darkened(0.55) if locked else b["color"].darkened(0.25)
+		icon_wrap.add_child(icon)
 	vbox.add_child(icon_wrap)
 
 	var lbl := Label.new()

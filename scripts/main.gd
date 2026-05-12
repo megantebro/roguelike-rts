@@ -1,4 +1,5 @@
 extends Node2D
+class_name Main
 
 const TILE_SIZE := 64
 const MAP_W := 150
@@ -9,10 +10,13 @@ const RESOURCE_SEED := 42
 const DRAG_THRESHOLD := 8.0
 const RESOURCE_RADIUS := TILE_SIZE * 1.5
 const SNAP_WORLD_RADIUS := TILE_SIZE * 0.6
+const BUILD_TIME := 3.0
+const METAL_SPACING    := 100.0
+const METAL_COLLIDE_R  := 36.0
 
-const RES_COLOR         := Color(0.0, 1.0, 0.25)
-const RES_COLOR_CLAIMED := Color(0.1, 0.4, 0.9)
-const SNAP_RING_COLOR   := Color(1.0, 1.0, 1.0, 0.9)
+const RES_COLOR       := Color(0.0, 1.0, 0.25)
+const RES_RING_COLOR  := Color(0.2, 0.5, 1.0)
+const SNAP_RING_COLOR := Color(1.0, 1.0, 1.0, 0.9)
 
 var _resource_positions: Array[Vector2] = []
 var _claimed_resources: Dictionary = {}
@@ -32,6 +36,7 @@ var _pending_keep_placing := false
 var _claim_queue: Array[int] = []
 var _res_drag_start      := Vector2.ZERO
 var _res_dragging        := false
+var _build_progress      := 0.0
 
 func _ready() -> void:
 	_generate_resources()
@@ -39,18 +44,26 @@ func _ready() -> void:
 	NetworkManager.player_updated.connect(_on_player_updated)
 	NetworkManager.player_left.connect(_on_player_left)
 	$CommanderHUD.build_selected.connect(_on_build_selected)
+	var bar_ov := preload("res://scripts/bar_overlay.gd").new()
+	bar_ov.main_node = self
+	add_child(bar_ov)
 
 func _process(delta: float) -> void:
 	if is_instance_valid(_p1):
+		call_deferred("_push_commander_from_metals")
 		if _placing_resource:
 			_update_snap()
 		if _pending_claim_idx >= 0:
 			var p1pos: Vector2 = (_p1 as Node2D).position
 			if p1pos.distance_squared_to(_resource_positions[_pending_claim_idx]) <= RESOURCE_RADIUS * RESOURCE_RADIUS:
-				_claimed_resources[_pending_claim_idx] = true
-				_pending_claim_idx = -1
+				_build_progress += delta
 				queue_redraw()
-				_start_next_in_queue()
+				if _build_progress >= BUILD_TIME:
+					_claimed_resources[_pending_claim_idx] = true
+					_pending_claim_idx = -1
+					_build_progress = 0.0
+					queue_redraw()
+					_start_next_in_queue()
 	_send_timer += delta
 	if _send_timer >= SEND_INTERVAL and is_instance_valid(_p1):
 		_send_timer = 0.0
@@ -65,10 +78,26 @@ func _draw() -> void:
 func _generate_resources() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = RESOURCE_SEED
-	for i in RESOURCE_COUNT:
-		var x := rng.randf_range(3 * TILE_SIZE, (MAP_W - 3) * TILE_SIZE)
-		var y := rng.randf_range(3 * TILE_SIZE, (MAP_H - 3) * TILE_SIZE)
-		_resource_positions.append(Vector2(x, y))
+	var spacing := 192.0
+	var jitter  := spacing * 0.2
+	var all: Array[Vector2] = []
+	var gx := 3.0 * TILE_SIZE + spacing * 0.5
+	while gx < (MAP_W - 3.0) * TILE_SIZE:
+		var gy := 3.0 * TILE_SIZE + spacing * 0.5
+		while gy < (MAP_H - 3.0) * TILE_SIZE:
+			all.append(Vector2(
+				gx + rng.randf_range(-jitter, jitter),
+				gy + rng.randf_range(-jitter, jitter)
+			))
+			gy += spacing
+		gx += spacing
+	for i in range(all.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var tmp := all[i]
+		all[i] = all[j]
+		all[j] = tmp
+	for i in mini(RESOURCE_COUNT, all.size()):
+		_resource_positions.append(all[i])
 
 func _update_snap() -> void:
 	var mouse_world := _screen_to_world(get_viewport().get_mouse_position())
@@ -84,36 +113,31 @@ func _update_snap() -> void:
 	if best_idx != _snap_resource_idx:
 		_snap_resource_idx = best_idx
 		queue_redraw()
-	if best_idx >= 0 and not _res_dragging:
-		Input.warp_mouse(_world_to_screen(_resource_positions[best_idx]))
 
 func _draw_resources() -> void:
-	var s := 14.0
+	var r := 10.0
 	for i in _resource_positions.size():
 		var pos := _resource_positions[i]
-		var col := RES_COLOR_CLAIMED if _claimed_resources.has(i) else RES_COLOR
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(pos.x,     pos.y - s),
-			Vector2(pos.x + s, pos.y),
-			Vector2(pos.x,     pos.y + s),
-			Vector2(pos.x - s, pos.y),
-		]), col)
+		draw_circle(pos, r, RES_COLOR)
+		if _claimed_resources.has(i):
+			draw_arc(pos, r + 5.0, 0.0, TAU, 32, RES_RING_COLOR, 2.5)
 
 	if _placing_resource and _snap_resource_idx >= 0 and not _res_dragging:
 		var pos := _resource_positions[_snap_resource_idx]
-		draw_arc(pos, s + 8.0, 0.0, TAU, 32, SNAP_RING_COLOR, 2.0)
+		var snap_col := Color(1.0, 0.25, 0.2, 0.9) if _too_close_to_metal(_snap_resource_idx) else SNAP_RING_COLOR
+		draw_arc(pos, r + 11.0, 0.0, TAU, 32, snap_col, 2.0)
 
 	if is_instance_valid(_p1) and (_claim_queue.size() > 0 or _pending_claim_idx >= 0):
 		var prev_pos: Vector2 = (_p1 as Node2D).position
 		if _pending_claim_idx >= 0:
 			var ppos := _resource_positions[_pending_claim_idx]
 			draw_line(prev_pos, ppos, Color(0.5, 0.8, 1.0, 0.5), 1.5)
-			draw_circle(ppos, s * 0.7, Color(0.3, 0.6, 1.0, 0.6))
+			draw_circle(ppos, r * 0.65, Color(0.3, 0.6, 1.0, 0.6))
 			prev_pos = ppos
 		for idx in _claim_queue:
 			var pos := _resource_positions[idx]
 			draw_line(prev_pos, pos, Color(0.5, 0.8, 1.0, 0.4), 1.5)
-			draw_circle(pos, s * 0.7, Color(0.3, 0.6, 1.0, 0.4))
+			draw_circle(pos, r * 0.65, Color(0.3, 0.6, 1.0, 0.4))
 			prev_pos = pos
 
 func _spawn_commanders() -> void:
@@ -207,14 +231,17 @@ func _handle_placement_input(event: InputEvent) -> void:
 			$CanvasLayer/SelectionBox.update_pos(event.position)
 
 func _place_single_resource() -> void:
+	if _too_close_to_metal(_snap_resource_idx):
+		return
 	var p1pos: Vector2 = (_p1 as Node2D).position
 	var res_pos := _resource_positions[_snap_resource_idx]
 	var shift := Input.is_key_pressed(KEY_SHIFT)
 	if p1pos.distance_squared_to(res_pos) <= RESOURCE_RADIUS * RESOURCE_RADIUS:
-		_claimed_resources[_snap_resource_idx] = true
+		_pending_claim_idx = _snap_resource_idx
 		_snap_resource_idx = -1
-		if not shift:
-			_cancel_placement()
+		_pending_keep_placing = shift
+		_build_progress = 0.0
+		(_p1 as Node2D).call("move_to", _stop_pos_for(_pending_claim_idx))
 		queue_redraw()
 	else:
 		_claim_queue.append(_snap_resource_idx)
@@ -226,6 +253,8 @@ func _queue_resources_in_rect(screen_rect: Rect2) -> void:
 	var to_add: Array[int] = []
 	for i in _resource_positions.size():
 		if _claimed_resources.has(i) or _claim_queue.has(i) or i == _pending_claim_idx:
+			continue
+		if _too_close_to_metal(i):
 			continue
 		if screen_rect.has_point(_world_to_screen(_resource_positions[i])):
 			to_add.append(i)
@@ -261,16 +290,42 @@ func _nearest_neighbor_sort(indices: Array[int], start: Vector2) -> Array[int]:
 		remaining.remove_at(best_i)
 	return sorted
 
+func _stop_pos_for(idx: int) -> Vector2:
+	var res_pos := _resource_positions[idx]
+	var dir := (_p1 as Node2D).position - res_pos
+	if dir.length_squared() > 1.0:
+		return res_pos + dir.normalized() * (METAL_COLLIDE_R + 2.0)
+	return res_pos + Vector2.RIGHT * (METAL_COLLIDE_R + 2.0)
+
 func _start_next_in_queue() -> void:
 	while not _claim_queue.is_empty():
 		var idx := _claim_queue[0]
 		_claim_queue.remove_at(0)
-		if not _claimed_resources.has(idx):
+		if not _claimed_resources.has(idx) and not _too_close_to_metal(idx):
 			_pending_claim_idx = idx
-			(_p1 as Node2D).call("move_to", _resource_positions[idx])
+			_build_progress = 0.0
+			(_p1 as Node2D).call("move_to", _stop_pos_for(idx))
 			return
 	if not _pending_keep_placing:
 		_cancel_placement()
+
+func _push_commander_from_metals() -> void:
+	if not is_instance_valid(_p1):
+		return
+	var u := _p1 as Node2D
+	for i in _resource_positions.size():
+		var rpos := _resource_positions[i]
+		var diff := u.position - rpos
+		var d2 := diff.length_squared()
+		if d2 < METAL_COLLIDE_R * METAL_COLLIDE_R and d2 > 0.001:
+			u.position += diff.normalized() * (METAL_COLLIDE_R - sqrt(d2))
+
+func _too_close_to_metal(idx: int) -> bool:
+	var pos := _resource_positions[idx]
+	for claimed_idx in _claimed_resources:
+		if pos.distance_squared_to(_resource_positions[claimed_idx]) < METAL_SPACING * METAL_SPACING:
+			return true
+	return false
 
 func _cancel_placement() -> void:
 	_placing_resource = false
@@ -279,6 +334,7 @@ func _cancel_placement() -> void:
 	_pending_keep_placing = false
 	_claim_queue.clear()
 	_res_dragging = false
+	_build_progress = 0.0
 	$CommanderHUD.deactivate()
 	queue_redraw()
 
