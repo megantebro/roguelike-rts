@@ -8,9 +8,11 @@ const RESOURCE_COUNT := 1200
 const RESOURCE_SEED := 42
 const DRAG_THRESHOLD := 8.0
 const RESOURCE_RADIUS := TILE_SIZE * 1.5
+const SNAP_WORLD_RADIUS := TILE_SIZE * 1.2
 
 const RES_COLOR         := Color(0.0, 1.0, 0.25)
 const RES_COLOR_CLAIMED := Color(0.1, 0.4, 0.9)
+const SNAP_RING_COLOR   := Color(1.0, 1.0, 1.0, 0.9)
 
 var _resource_positions: Array[Vector2] = []
 var _claimed_resources: Dictionary = {}
@@ -23,15 +25,19 @@ var _remote_commanders: Dictionary = {}
 var _send_timer := 0.0
 const SEND_INTERVAL := 0.05
 
+var _placing_resource := false
+var _snap_resource_idx := -1
+
 func _ready() -> void:
 	_generate_resources()
 	_spawn_commanders()
 	NetworkManager.player_updated.connect(_on_player_updated)
 	NetworkManager.player_left.connect(_on_player_left)
+	$CommanderHUD.build_selected.connect(_on_build_selected)
 
 func _process(delta: float) -> void:
-	if is_instance_valid(_p1):
-		_update_claimed_resources(_p1.position)
+	if _placing_resource and is_instance_valid(_p1):
+		_update_snap()
 	_send_timer += delta
 	if _send_timer >= SEND_INTERVAL and is_instance_valid(_p1):
 		_send_timer = 0.0
@@ -51,16 +57,29 @@ func _generate_resources() -> void:
 		var y := rng.randf_range(3 * TILE_SIZE, (MAP_H - 3) * TILE_SIZE)
 		_resource_positions.append(Vector2(x, y))
 
-func _update_claimed_resources(commander_pos: Vector2) -> void:
+func _update_snap() -> void:
+	var mouse_world := _screen_to_world(get_viewport().get_mouse_position())
+	var commander_pos := _p1.position
+	var best_idx := -1
+	var best_d2 := SNAP_WORLD_RADIUS * SNAP_WORLD_RADIUS
 	var r2 := RESOURCE_RADIUS * RESOURCE_RADIUS
-	var changed := false
+
 	for i in _resource_positions.size():
-		if not _claimed_resources.has(i):
-			if commander_pos.distance_squared_to(_resource_positions[i]) <= r2:
-				_claimed_resources[i] = true
-				changed = true
-	if changed:
+		if _claimed_resources.has(i):
+			continue
+		if commander_pos.distance_squared_to(_resource_positions[i]) > r2:
+			continue
+		var d2 := mouse_world.distance_squared_to(_resource_positions[i])
+		if d2 < best_d2:
+			best_d2 = d2
+			best_idx = i
+
+	if best_idx != _snap_resource_idx:
+		_snap_resource_idx = best_idx
 		queue_redraw()
+
+	if best_idx >= 0:
+		Input.warp_mouse(_world_to_screen(_resource_positions[best_idx]))
 
 func _draw_resources() -> void:
 	var s := 14.0
@@ -74,6 +93,10 @@ func _draw_resources() -> void:
 			Vector2(pos.x - s, pos.y),
 		]), col)
 
+	if _placing_resource and _snap_resource_idx >= 0:
+		var pos := _resource_positions[_snap_resource_idx]
+		draw_arc(pos, s + 8.0, 0.0, TAU, 32, SNAP_RING_COLOR, 2.0)
+
 func _spawn_commanders() -> void:
 	var unit_scene := preload("res://scenes/unit.tscn")
 	_p1 = unit_scene.instantiate()
@@ -81,6 +104,11 @@ func _spawn_commanders() -> void:
 	_p1.position = Vector2(10 * TILE_SIZE + TILE_SIZE / 2.0, 10 * TILE_SIZE + TILE_SIZE / 2.0)
 	_p1.unit_selected.connect(_on_unit_selected)
 	$Units.add_child(_p1)
+
+func _on_build_selected(bname: String) -> void:
+	_placing_resource = (bname == "Metal\nExtractor")
+	_snap_resource_idx = -1
+	queue_redraw()
 
 func _on_player_updated(id: int, data: Dictionary) -> void:
 	var pos := Vector2(float(data.get("x", 0)), float(data.get("y", 0)))
@@ -110,13 +138,28 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventMouseButton and event.pressed):
 		return
 	if event.button_index == MOUSE_BUTTON_LEFT:
-		_left_on_ground = true
-		_drag_start_screen = event.position
+		if _placing_resource:
+			if _snap_resource_idx >= 0:
+				_claimed_resources[_snap_resource_idx] = true
+				_snap_resource_idx = -1
+				_placing_resource = false
+				$CommanderHUD.deactivate()
+				queue_redraw()
+		else:
+			_left_on_ground = true
+			_drag_start_screen = event.position
 	elif event.button_index == MOUSE_BUTTON_RIGHT:
-		if _selected_units.size() > 0:
+		if _placing_resource:
+			_placing_resource = false
+			_snap_resource_idx = -1
+			$CommanderHUD.deactivate()
+			queue_redraw()
+		elif _selected_units.size() > 0:
 			_move_selected_to(_screen_to_world(event.position))
 
 func _input(event: InputEvent) -> void:
+	if _placing_resource:
+		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		if _is_dragging:
 			var screen_rect: Rect2 = $CanvasLayer/SelectionBox.stop()
@@ -136,6 +179,9 @@ func _deselect_all() -> void:
 	for unit in _selected_units:
 		unit.deselect()
 	_selected_units.clear()
+	_placing_resource = false
+	_snap_resource_idx = -1
+	queue_redraw()
 	$CommanderHUD.hide_hud()
 
 func _select_in_rect(screen_rect: Rect2) -> void:
