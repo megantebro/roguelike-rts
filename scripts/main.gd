@@ -9,11 +9,11 @@ const RESOURCE_SEED := 42
 const DRAG_THRESHOLD := 8.0
 const RESOURCE_RADIUS := TILE_SIZE * 1.5
 
-const RES_COLOR        := Color(0.1, 0.35, 0.85)
-const RES_COLOR_NEARBY := Color(0.5, 0.85, 1.0)
+const RES_COLOR         := Color(0.0, 1.0, 0.25)
+const RES_COLOR_CLAIMED := Color(0.1, 0.4, 0.9)
 
 var _resource_positions: Array[Vector2] = []
-var _nearby_resource_indices: Array[int] = []
+var _claimed_resources: Dictionary = {}
 var _selected_units: Array = []
 var _left_on_ground := false
 var _is_dragging := false
@@ -30,11 +30,8 @@ func _ready() -> void:
 	NetworkManager.player_left.connect(_on_player_left)
 
 func _process(delta: float) -> void:
-	if _selected_units.size() > 0:
-		_update_nearby_resources(_selected_units[0].position)
-	elif _nearby_resource_indices.size() > 0:
-		_nearby_resource_indices.clear()
-		queue_redraw()
+	if is_instance_valid(_p1):
+		_update_claimed_resources(_p1.position)
 	_send_timer += delta
 	if _send_timer >= SEND_INTERVAL and is_instance_valid(_p1):
 		_send_timer = 0.0
@@ -54,21 +51,22 @@ func _generate_resources() -> void:
 		var y := rng.randf_range(3 * TILE_SIZE, (MAP_H - 3) * TILE_SIZE)
 		_resource_positions.append(Vector2(x, y))
 
-func _update_nearby_resources(commander_pos: Vector2) -> void:
+func _update_claimed_resources(commander_pos: Vector2) -> void:
 	var r2 := RESOURCE_RADIUS * RESOURCE_RADIUS
-	var new_nearby: Array[int] = []
+	var changed := false
 	for i in _resource_positions.size():
-		if commander_pos.distance_squared_to(_resource_positions[i]) <= r2:
-			new_nearby.append(i)
-	if new_nearby != _nearby_resource_indices:
-		_nearby_resource_indices = new_nearby
+		if not _claimed_resources.has(i):
+			if commander_pos.distance_squared_to(_resource_positions[i]) <= r2:
+				_claimed_resources[i] = true
+				changed = true
+	if changed:
 		queue_redraw()
 
 func _draw_resources() -> void:
 	var s := 14.0
 	for i in _resource_positions.size():
 		var pos := _resource_positions[i]
-		var col := RES_COLOR_NEARBY if _nearby_resource_indices.has(i) else RES_COLOR
+		var col := RES_COLOR_CLAIMED if _claimed_resources.has(i) else RES_COLOR
 		draw_colored_polygon(PackedVector2Array([
 			Vector2(pos.x,     pos.y - s),
 			Vector2(pos.x + s, pos.y),
