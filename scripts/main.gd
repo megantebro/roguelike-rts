@@ -8,7 +8,7 @@ const RESOURCE_COUNT := 1200
 const RESOURCE_SEED := 42
 const DRAG_THRESHOLD := 8.0
 const RESOURCE_RADIUS := TILE_SIZE * 1.5
-const SNAP_WORLD_RADIUS := TILE_SIZE * 1.2
+const SNAP_WORLD_RADIUS := TILE_SIZE * 0.6
 
 const RES_COLOR         := Color(0.0, 1.0, 0.25)
 const RES_COLOR_CLAIMED := Color(0.1, 0.4, 0.9)
@@ -28,6 +28,7 @@ const SEND_INTERVAL := 0.05
 var _placing_resource := false
 var _snap_resource_idx := -1
 var _pending_claim_idx := -1
+var _pending_keep_placing := false
 
 func _ready() -> void:
 	_generate_resources()
@@ -46,8 +47,10 @@ func _process(delta: float) -> void:
 			if p1pos.distance_squared_to(_resource_positions[_pending_claim_idx]) <= r2:
 				_claimed_resources[_pending_claim_idx] = true
 				_pending_claim_idx = -1
-				_placing_resource = false
-				$CommanderHUD.deactivate()
+				if not _pending_keep_placing:
+					_placing_resource = false
+					$CommanderHUD.deactivate()
+				_pending_keep_placing = false
 				queue_redraw()
 	_send_timer += delta
 	if _send_timer >= SEND_INTERVAL and is_instance_valid(_p1):
@@ -150,14 +153,17 @@ func _unhandled_input(event: InputEvent) -> void:
 				var p1pos: Vector2 = (_p1 as Node2D).position
 				var r2 := RESOURCE_RADIUS * RESOURCE_RADIUS
 				var res_pos := _resource_positions[_snap_resource_idx]
+				var shift := Input.is_key_pressed(KEY_SHIFT)
 				if p1pos.distance_squared_to(res_pos) <= r2:
 					_claimed_resources[_snap_resource_idx] = true
 					_snap_resource_idx = -1
-					_placing_resource = false
-					$CommanderHUD.deactivate()
+					if not shift:
+						_placing_resource = false
+						$CommanderHUD.deactivate()
 					queue_redraw()
 				else:
 					_pending_claim_idx = _snap_resource_idx
+					_pending_keep_placing = shift
 					(_p1 as Node2D).call("move_to", res_pos)
 		else:
 			_left_on_ground = true
@@ -167,6 +173,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_placing_resource = false
 			_snap_resource_idx = -1
 			_pending_claim_idx = -1
+			_pending_keep_placing = false
 			$CommanderHUD.deactivate()
 			queue_redraw()
 		elif _selected_units.size() > 0:
@@ -197,6 +204,7 @@ func _deselect_all() -> void:
 	_placing_resource = false
 	_snap_resource_idx = -1
 	_pending_claim_idx = -1
+	_pending_keep_placing = false
 	queue_redraw()
 	$CommanderHUD.hide_hud()
 
