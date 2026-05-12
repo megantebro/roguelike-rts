@@ -7,8 +7,13 @@ const TILE_COLOR := Color(0.3, 0.3, 0.3)
 const RESOURCE_COUNT := 1200
 const RESOURCE_SEED := 42
 const DRAG_THRESHOLD := 8.0
+const RESOURCE_RADIUS := TILE_SIZE * 1.5
+
+const RES_COLOR        := Color(0.1, 0.35, 0.85)
+const RES_COLOR_NEARBY := Color(0.5, 0.85, 1.0)
 
 var _resource_positions: Array[Vector2] = []
+var _nearby_resource_indices: Array[int] = []
 var _selected_units: Array = []
 var _left_on_ground := false
 var _is_dragging := false
@@ -17,6 +22,13 @@ var _drag_start_screen := Vector2.ZERO
 func _ready() -> void:
 	_generate_resources()
 	_spawn_commanders()
+
+func _process(_delta: float) -> void:
+	if _selected_units.size() > 0:
+		_update_nearby_resources(_selected_units[0].position)
+	elif _nearby_resource_indices.size() > 0:
+		_nearby_resource_indices.clear()
+		queue_redraw()
 
 func _draw() -> void:
 	var map_rect := Rect2(0, 0, MAP_W * TILE_SIZE, MAP_H * TILE_SIZE)
@@ -32,10 +44,21 @@ func _generate_resources() -> void:
 		var y := rng.randf_range(3 * TILE_SIZE, (MAP_H - 3) * TILE_SIZE)
 		_resource_positions.append(Vector2(x, y))
 
+func _update_nearby_resources(commander_pos: Vector2) -> void:
+	var r2 := RESOURCE_RADIUS * RESOURCE_RADIUS
+	var new_nearby: Array[int] = []
+	for i in _resource_positions.size():
+		if commander_pos.distance_squared_to(_resource_positions[i]) <= r2:
+			new_nearby.append(i)
+	if new_nearby != _nearby_resource_indices:
+		_nearby_resource_indices = new_nearby
+		queue_redraw()
+
 func _draw_resources() -> void:
 	var s := 14.0
-	var col := Color(0.0, 1.0, 0.25)
-	for pos in _resource_positions:
+	for i in _resource_positions.size():
+		var pos := _resource_positions[i]
+		var col := RES_COLOR_NEARBY if _nearby_resource_indices.has(i) else RES_COLOR
 		draw_colored_polygon(PackedVector2Array([
 			Vector2(pos.x,     pos.y - s),
 			Vector2(pos.x + s, pos.y),
@@ -63,6 +86,7 @@ func _on_unit_selected(unit) -> void:
 	_deselect_all()
 	_selected_units.append(unit)
 	unit.select()
+	$CommanderHUD.show_hud()
 	_left_on_ground = false
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -95,6 +119,7 @@ func _deselect_all() -> void:
 	for unit in _selected_units:
 		unit.deselect()
 	_selected_units.clear()
+	$CommanderHUD.hide_hud()
 
 func _select_in_rect(screen_rect: Rect2) -> void:
 	_deselect_all()
@@ -102,6 +127,8 @@ func _select_in_rect(screen_rect: Rect2) -> void:
 		if screen_rect.has_point(_world_to_screen(unit.position)):
 			unit.select()
 			_selected_units.append(unit)
+	if _selected_units.size() > 0:
+		$CommanderHUD.show_hud()
 
 func _move_selected_to(target: Vector2) -> void:
 	var count := _selected_units.size()
