@@ -25,10 +25,13 @@ var _remote_commanders: Dictionary = {}
 var _send_timer := 0.0
 const SEND_INTERVAL := 0.05
 
-var _placing_resource := false
-var _snap_resource_idx := -1
-var _pending_claim_idx := -1
+var _placing_resource    := false
+var _snap_resource_idx   := -1
+var _pending_claim_idx   := -1
 var _pending_keep_placing := false
+var _claim_queue: Array[int] = []
+var _res_drag_start      := Vector2.ZERO
+var _res_dragging        := false
 
 func _ready() -> void:
 	_generate_resources()
@@ -43,15 +46,11 @@ func _process(delta: float) -> void:
 			_update_snap()
 		if _pending_claim_idx >= 0:
 			var p1pos: Vector2 = (_p1 as Node2D).position
-			var r2 := RESOURCE_RADIUS * RESOURCE_RADIUS
-			if p1pos.distance_squared_to(_resource_positions[_pending_claim_idx]) <= r2:
+			if p1pos.distance_squared_to(_resource_positions[_pending_claim_idx]) <= RESOURCE_RADIUS * RESOURCE_RADIUS:
 				_claimed_resources[_pending_claim_idx] = true
 				_pending_claim_idx = -1
-				if not _pending_keep_placing:
-					_placing_resource = false
-					$CommanderHUD.deactivate()
-				_pending_keep_placing = false
 				queue_redraw()
+				_start_next_in_queue()
 	_send_timer += delta
 	if _send_timer >= SEND_INTERVAL and is_instance_valid(_p1):
 		_send_timer = 0.0
@@ -75,7 +74,6 @@ func _update_snap() -> void:
 	var mouse_world := _screen_to_world(get_viewport().get_mouse_position())
 	var best_idx := -1
 	var best_d2 := SNAP_WORLD_RADIUS * SNAP_WORLD_RADIUS
-
 	for i in _resource_positions.size():
 		if _claimed_resources.has(i):
 			continue
@@ -83,12 +81,10 @@ func _update_snap() -> void:
 		if d2 < best_d2:
 			best_d2 = d2
 			best_idx = i
-
 	if best_idx != _snap_resource_idx:
 		_snap_resource_idx = best_idx
 		queue_redraw()
-
-	if best_idx >= 0:
+	if best_idx >= 0 and not _res_dragging:
 		Input.warp_mouse(_world_to_screen(_resource_positions[best_idx]))
 
 func _draw_resources() -> void:
@@ -103,9 +99,22 @@ func _draw_resources() -> void:
 			Vector2(pos.x - s, pos.y),
 		]), col)
 
-	if _placing_resource and _snap_resource_idx >= 0:
+	if _placing_resource and _snap_resource_idx >= 0 and not _res_dragging:
 		var pos := _resource_positions[_snap_resource_idx]
 		draw_arc(pos, s + 8.0, 0.0, TAU, 32, SNAP_RING_COLOR, 2.0)
+
+	if is_instance_valid(_p1) and (_claim_queue.size() > 0 or _pending_claim_idx >= 0):
+		var prev_pos: Vector2 = (_p1 as Node2D).position
+		if _pending_claim_idx >= 0:
+			var ppos := _resource_positions[_pending_claim_idx]
+			draw_line(prev_pos, ppos, Color(0.5, 0.8, 1.0, 0.5), 1.5)
+			draw_circle(ppos, s * 0.7, Color(0.3, 0.6, 1.0, 0.6))
+			prev_pos = ppos
+		for idx in _claim_queue:
+			var pos := _resource_positions[idx]
+			draw_line(prev_pos, pos, Color(0.5, 0.8, 1.0, 0.4), 1.5)
+			draw_circle(pos, s * 0.7, Color(0.3, 0.6, 1.0, 0.4))
+			prev_pos = pos
 
 func _spawn_commanders() -> void:
 	var unit_scene := preload("res://scenes/unit.tscn")
@@ -145,42 +154,20 @@ func _on_unit_selected(unit) -> void:
 	_left_on_ground = false
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _placing_resource:
+		return
 	if not (event is InputEventMouseButton and event.pressed):
 		return
 	if event.button_index == MOUSE_BUTTON_LEFT:
-		if _placing_resource:
-			if _snap_resource_idx >= 0:
-				var p1pos: Vector2 = (_p1 as Node2D).position
-				var r2 := RESOURCE_RADIUS * RESOURCE_RADIUS
-				var res_pos := _resource_positions[_snap_resource_idx]
-				var shift := Input.is_key_pressed(KEY_SHIFT)
-				if p1pos.distance_squared_to(res_pos) <= r2:
-					_claimed_resources[_snap_resource_idx] = true
-					_snap_resource_idx = -1
-					if not shift:
-						_placing_resource = false
-						$CommanderHUD.deactivate()
-					queue_redraw()
-				else:
-					_pending_claim_idx = _snap_resource_idx
-					_pending_keep_placing = shift
-					(_p1 as Node2D).call("move_to", res_pos)
-		else:
-			_left_on_ground = true
-			_drag_start_screen = event.position
+		_left_on_ground = true
+		_drag_start_screen = event.position
 	elif event.button_index == MOUSE_BUTTON_RIGHT:
-		if _placing_resource:
-			_placing_resource = false
-			_snap_resource_idx = -1
-			_pending_claim_idx = -1
-			_pending_keep_placing = false
-			$CommanderHUD.deactivate()
-			queue_redraw()
-		elif _selected_units.size() > 0:
+		if _selected_units.size() > 0:
 			_move_selected_to(_screen_to_world(event.position))
 
 func _input(event: InputEvent) -> void:
 	if _placing_resource:
+		_handle_placement_input(event)
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		if _is_dragging:
@@ -197,15 +184,109 @@ func _input(event: InputEvent) -> void:
 		if _is_dragging:
 			$CanvasLayer/SelectionBox.update_pos(event.position)
 
-func _deselect_all() -> void:
-	for unit in _selected_units:
-		unit.deselect()
-	_selected_units.clear()
+func _handle_placement_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				_res_drag_start = event.position
+				_res_dragging = false
+			else:
+				if _res_dragging:
+					var screen_rect: Rect2 = $CanvasLayer/SelectionBox.stop()
+					_queue_resources_in_rect(screen_rect)
+					_res_dragging = false
+				elif _snap_resource_idx >= 0:
+					_place_single_resource()
+		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+			_cancel_placement()
+	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		if not _res_dragging and event.position.distance_to(_res_drag_start) > DRAG_THRESHOLD:
+			_res_dragging = true
+			$CanvasLayer/SelectionBox.begin(_res_drag_start)
+		if _res_dragging:
+			$CanvasLayer/SelectionBox.update_pos(event.position)
+
+func _place_single_resource() -> void:
+	var p1pos: Vector2 = (_p1 as Node2D).position
+	var res_pos := _resource_positions[_snap_resource_idx]
+	var shift := Input.is_key_pressed(KEY_SHIFT)
+	if p1pos.distance_squared_to(res_pos) <= RESOURCE_RADIUS * RESOURCE_RADIUS:
+		_claimed_resources[_snap_resource_idx] = true
+		_snap_resource_idx = -1
+		if not shift:
+			_cancel_placement()
+		queue_redraw()
+	else:
+		_claim_queue.append(_snap_resource_idx)
+		_pending_keep_placing = shift
+		if _pending_claim_idx < 0:
+			_start_next_in_queue()
+
+func _queue_resources_in_rect(screen_rect: Rect2) -> void:
+	var to_add: Array[int] = []
+	for i in _resource_positions.size():
+		if _claimed_resources.has(i) or _claim_queue.has(i) or i == _pending_claim_idx:
+			continue
+		if screen_rect.has_point(_world_to_screen(_resource_positions[i])):
+			to_add.append(i)
+	if to_add.is_empty():
+		return
+	var start: Vector2
+	if not _claim_queue.is_empty():
+		start = _resource_positions[_claim_queue.back()]
+	elif _pending_claim_idx >= 0:
+		start = _resource_positions[_pending_claim_idx]
+	else:
+		start = (_p1 as Node2D).position
+	_claim_queue.append_array(_nearest_neighbor_sort(to_add, start))
+	_pending_keep_placing = Input.is_key_pressed(KEY_SHIFT)
+	if _pending_claim_idx < 0:
+		_start_next_in_queue()
+	queue_redraw()
+
+func _nearest_neighbor_sort(indices: Array[int], start: Vector2) -> Array[int]:
+	var remaining := indices.duplicate()
+	var sorted: Array[int] = []
+	var current := start
+	while not remaining.is_empty():
+		var best_i := 0
+		var best_d2 := current.distance_squared_to(_resource_positions[remaining[0]])
+		for j in range(1, remaining.size()):
+			var d2 := current.distance_squared_to(_resource_positions[remaining[j]])
+			if d2 < best_d2:
+				best_d2 = d2
+				best_i = j
+		sorted.append(remaining[best_i])
+		current = _resource_positions[remaining[best_i]]
+		remaining.remove_at(best_i)
+	return sorted
+
+func _start_next_in_queue() -> void:
+	while not _claim_queue.is_empty():
+		var idx := _claim_queue[0]
+		_claim_queue.remove_at(0)
+		if not _claimed_resources.has(idx):
+			_pending_claim_idx = idx
+			(_p1 as Node2D).call("move_to", _resource_positions[idx])
+			return
+	if not _pending_keep_placing:
+		_cancel_placement()
+
+func _cancel_placement() -> void:
 	_placing_resource = false
 	_snap_resource_idx = -1
 	_pending_claim_idx = -1
 	_pending_keep_placing = false
+	_claim_queue.clear()
+	_res_dragging = false
+	$CommanderHUD.deactivate()
 	queue_redraw()
+
+func _deselect_all() -> void:
+	for unit in _selected_units:
+		unit.deselect()
+	_selected_units.clear()
+	_cancel_placement()
 	$CommanderHUD.hide_hud()
 
 func _select_in_rect(screen_rect: Rect2) -> void:
