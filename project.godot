@@ -23,6 +23,10 @@ project/assembly_name="roguelike_rts"
 
 3d/physics_engine="Jolt Physics"
 
+[autoload]
+
+NetworkManager="*res://scripts/network_manager.gd"
+
 [rendering]
 
 rendering_device/driver.windows="d3d12"

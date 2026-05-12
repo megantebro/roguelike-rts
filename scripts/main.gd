@@ -18,17 +18,27 @@ var _selected_units: Array = []
 var _left_on_ground := false
 var _is_dragging := false
 var _drag_start_screen := Vector2.ZERO
+var _p1: Node = null
+var _remote_commanders: Dictionary = {}
+var _send_timer := 0.0
+const SEND_INTERVAL := 0.05
 
 func _ready() -> void:
 	_generate_resources()
 	_spawn_commanders()
+	NetworkManager.player_updated.connect(_on_player_updated)
+	NetworkManager.player_left.connect(_on_player_left)
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _selected_units.size() > 0:
 		_update_nearby_resources(_selected_units[0].position)
 	elif _nearby_resource_indices.size() > 0:
 		_nearby_resource_indices.clear()
 		queue_redraw()
+	_send_timer += delta
+	if _send_timer >= SEND_INTERVAL and is_instance_valid(_p1):
+		_send_timer = 0.0
+		NetworkManager.send_state("commander", 100, _p1.position)
 
 func _draw() -> void:
 	var map_rect := Rect2(0, 0, MAP_W * TILE_SIZE, MAP_H * TILE_SIZE)
@@ -68,19 +78,28 @@ func _draw_resources() -> void:
 
 func _spawn_commanders() -> void:
 	var unit_scene := preload("res://scenes/unit.tscn")
-	var units_node := $Units
+	_p1 = unit_scene.instantiate()
+	_p1.unit_color = Color(0.2, 0.5, 1.0)
+	_p1.position = Vector2(10 * TILE_SIZE + TILE_SIZE / 2.0, 10 * TILE_SIZE + TILE_SIZE / 2.0)
+	_p1.unit_selected.connect(_on_unit_selected)
+	$Units.add_child(_p1)
 
-	var p1 := unit_scene.instantiate()
-	p1.unit_color = Color(0.2, 0.5, 1.0)
-	p1.position = Vector2(10 * TILE_SIZE + TILE_SIZE / 2.0, 10 * TILE_SIZE + TILE_SIZE / 2.0)
-	p1.unit_selected.connect(_on_unit_selected)
-	units_node.add_child(p1)
+func _on_player_updated(id: int, data: Dictionary) -> void:
+	var pos := Vector2(float(data.get("x", 0)), float(data.get("y", 0)))
+	if not _remote_commanders.has(id):
+		var unit_scene := preload("res://scenes/unit.tscn")
+		var cmd := unit_scene.instantiate()
+		cmd.unit_color = Color(1.0, 0.3, 0.2)
+		cmd.position = pos
+		$Units.add_child(cmd)
+		_remote_commanders[id] = cmd
+	else:
+		_remote_commanders[id].position = pos
 
-	var p2 := unit_scene.instantiate()
-	p2.unit_color = Color(1.0, 0.3, 0.2)
-	p2.position = Vector2(139 * TILE_SIZE + TILE_SIZE / 2.0, 139 * TILE_SIZE + TILE_SIZE / 2.0)
-	p2.unit_selected.connect(_on_unit_selected)
-	units_node.add_child(p2)
+func _on_player_left(id: int) -> void:
+	if _remote_commanders.has(id):
+		_remote_commanders[id].queue_free()
+		_remote_commanders.erase(id)
 
 func _on_unit_selected(unit) -> void:
 	_deselect_all()

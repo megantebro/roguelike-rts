@@ -16,7 +16,7 @@ function broadcast(msg, exceptId) {
 
 wss.on("connection", (ws) => {
   const id = nextId++;
-  const state = { unit_type: null, hp: 0 };
+  const state = { unit_type: null, hp: 0, x: 0, y: 0 };
   clients.set(id, { ws, state });
 
   ws.send(JSON.stringify({ type: "welcome", id }));
@@ -29,6 +29,8 @@ wss.on("connection", (ws) => {
       id: otherId,
       unit_type: c.state.unit_type,
       hp: c.state.hp,
+      x: c.state.x,
+      y: c.state.y,
     }));
   }
 
@@ -41,13 +43,17 @@ wss.on("connection", (ws) => {
 
     const c = clients.get(id);
     if (msg.unit_type !== undefined) c.state.unit_type = String(msg.unit_type);
-    if (msg.hp !== undefined) c.state.hp = Number(msg.hp);
+    if (msg.hp        !== undefined) c.state.hp        = Number(msg.hp);
+    if (msg.x         !== undefined) c.state.x         = Number(msg.x);
+    if (msg.y         !== undefined) c.state.y         = Number(msg.y);
 
     broadcast({
       type: "update",
       id,
       unit_type: c.state.unit_type,
       hp: c.state.hp,
+      x: c.state.x,
+      y: c.state.y,
     }, id);
   });
 
