@@ -10,6 +10,8 @@ const SPEED := 300.0
 var selected := false
 var _target: Vector2
 
+var _texture: Texture2D = preload("res://icon/commander.png")
+
 func _ready() -> void:
 	_target = position
 
@@ -19,9 +21,10 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 func _draw() -> void:
-	draw_rect(Rect2(-SIZE / 2.0, -SIZE / 2.0, SIZE, SIZE), unit_color)
-	var border_color := Color.WHITE if selected else Color.BLACK
-	draw_rect(Rect2(-SIZE / 2.0, -SIZE / 2.0, SIZE, SIZE), border_color, false, 2.0)
+	var half := SIZE / 2.0
+	draw_texture_rect(_texture, Rect2(-half, -half, SIZE, SIZE), false, unit_color)
+	if selected:
+		draw_rect(Rect2(-half, -half, SIZE, SIZE), Color.WHITE, false, 2.0)
 
 func _input_event(_viewport: Viewport, event: InputEvent, _shape_idx: int) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:

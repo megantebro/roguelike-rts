@@ -8,6 +8,7 @@ const MOVE_SPEED := 1200.0
 const ZOOM_STEP := 0.1
 const ZOOM_MIN := 0.3
 const ZOOM_MAX := 3.0
+const OUTER_TILES := 50
 
 var _dragging := false
 
@@ -42,5 +43,6 @@ func _input(event: InputEvent) -> void:
 
 func _clamp() -> void:
 	var half := get_viewport_rect().size / zoom / 2.0
-	position.x = clamp(position.x, half.x, MAP_W * TILE_SIZE - half.x)
-	position.y = clamp(position.y, half.y, MAP_H * TILE_SIZE - half.y)
+	var outer := OUTER_TILES * TILE_SIZE
+	position.x = clamp(position.x, half.x - outer, MAP_W * TILE_SIZE + outer - half.x)
+	position.y = clamp(position.y, half.y - outer, MAP_H * TILE_SIZE + outer - half.y)

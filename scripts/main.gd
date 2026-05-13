@@ -13,6 +13,14 @@ const SNAP_WORLD_RADIUS := TILE_SIZE * 0.6
 const BUILD_TIME := 3.0
 const METAL_SPACING    := 100.0
 const METAL_COLLIDE_R  := 36.0
+const OUTER_TILES      := 50
+const SURF_TILE        := 512
+const FACTORY_SIZE       := 128.0
+const FACTORY_BUILD_TIME := 10.0
+const FACTORY_RADIUS     := TILE_SIZE * 1.5
+
+var _surf_texture: Texture2D    = preload("res://icon/Surf.png")
+var _factory_texture: Texture2D = preload("res://icon/Tank Factory.png")
 
 const RES_COLOR       := Color(0.0, 1.0, 0.25)
 const RES_RING_COLOR  := Color(0.2, 0.5, 1.0)
@@ -37,6 +45,14 @@ var _claim_queue: Array[int] = []
 var _res_drag_start      := Vector2.ZERO
 var _res_dragging        := false
 var _build_progress      := 0.0
+
+var _placing_factory       := false
+var _factory_preview       := Vector2.ZERO
+var _factory_positions: Array[Vector2] = []
+var _factory_queue: Array[Vector2]     = []
+var _factory_is_building   := false
+var _factory_building_pos  := Vector2.ZERO
+var _factory_build_progress := 0.0
 
 func _ready() -> void:
 	_generate_resources()
@@ -64,16 +80,63 @@ func _process(delta: float) -> void:
 					_build_progress = 0.0
 					queue_redraw()
 					_start_next_in_queue()
+		if _factory_is_building:
+			var p1pos: Vector2 = (_p1 as Node2D).position
+			if p1pos.distance_squared_to(_factory_building_pos) <= FACTORY_RADIUS * FACTORY_RADIUS:
+				_factory_build_progress += delta
+				queue_redraw()
+				if _factory_build_progress >= FACTORY_BUILD_TIME:
+					_factory_positions.append(_factory_building_pos)
+					_factory_is_building = false
+					_factory_build_progress = 0.0
+					queue_redraw()
+					_start_next_factory()
 	_send_timer += delta
 	if _send_timer >= SEND_INTERVAL and is_instance_valid(_p1):
 		_send_timer = 0.0
 		NetworkManager.send_state("commander", 100, (_p1 as Node2D).position)
 
 func _draw() -> void:
+	var outer := OUTER_TILES * TILE_SIZE
+	var x0 := -outer
+	var y0 := -outer
+	var x1 := MAP_W * TILE_SIZE + outer
+	var y1 := MAP_H * TILE_SIZE + outer
+	var col := 0
+	var x := x0
+	while x < x1:
+		var row := 0
+		var y := y0
+		while y < y1:
+			var sx := -1.0 if (col % 2 == 1) else 1.0
+			var sy := -1.0 if (row % 2 == 1) else 1.0
+			var ox := x + SURF_TILE if (col % 2 == 1) else x
+			var oy := y + SURF_TILE if (row % 2 == 1) else y
+			draw_set_transform(Vector2(ox, oy), 0.0, Vector2(sx, sy))
+			draw_texture_rect(_surf_texture, Rect2(0, 0, SURF_TILE, SURF_TILE), false)
+			y += SURF_TILE
+			row += 1
+		x += SURF_TILE
+		col += 1
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	var map_rect := Rect2(0, 0, MAP_W * TILE_SIZE, MAP_H * TILE_SIZE)
 	draw_rect(map_rect, TILE_COLOR)
 	_draw_resources()
+	_draw_factories()
 	draw_rect(map_rect, Color.YELLOW, false, 8.0)
+
+func _draw_factories() -> void:
+	var half := FACTORY_SIZE / 2.0
+	for fpos in _factory_positions:
+		draw_texture_rect(_factory_texture, Rect2(fpos - Vector2(half, half), Vector2(FACTORY_SIZE, FACTORY_SIZE)), false)
+	if _factory_is_building:
+		draw_texture_rect(_factory_texture, Rect2(_factory_building_pos - Vector2(half, half), Vector2(FACTORY_SIZE, FACTORY_SIZE)), false, Color(1, 1, 1, 0.5))
+	for fpos in _factory_queue:
+		draw_texture_rect(_factory_texture, Rect2(fpos - Vector2(half, half), Vector2(FACTORY_SIZE, FACTORY_SIZE)), false, Color(1, 1, 1, 0.3))
+	if _placing_factory:
+		var invalid := _factory_overlaps(_factory_preview)
+		var col := Color(1, 0.2, 0.2, 0.6) if invalid else Color(1, 1, 1, 0.6)
+		draw_texture_rect(_factory_texture, Rect2(_factory_preview - Vector2(half, half), Vector2(FACTORY_SIZE, FACTORY_SIZE)), false, col)
 
 func _generate_resources() -> void:
 	var rng := RandomNumberGenerator.new()
@@ -150,6 +213,7 @@ func _spawn_commanders() -> void:
 
 func _on_build_selected(bname: String) -> void:
 	_placing_resource = (bname == "Metal\nExtractor")
+	_placing_factory  = (bname == "Factory")
 	_snap_resource_idx = -1
 	queue_redraw()
 
@@ -178,7 +242,7 @@ func _on_unit_selected(unit) -> void:
 	_left_on_ground = false
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _placing_resource:
+	if _placing_resource or _placing_factory:
 		return
 	if not (event is InputEventMouseButton and event.pressed):
 		return
@@ -190,6 +254,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			_move_selected_to(_screen_to_world(event.position))
 
 func _input(event: InputEvent) -> void:
+	if _placing_factory:
+		_handle_factory_input(event)
+		return
 	if _placing_resource:
 		_handle_placement_input(event)
 		return
@@ -327,8 +394,51 @@ func _too_close_to_metal(idx: int) -> bool:
 			return true
 	return false
 
+func _handle_factory_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		_factory_preview = _screen_to_world(event.position)
+		queue_redraw()
+	elif event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if not _factory_overlaps(_factory_preview):
+				_factory_queue.append(_factory_preview)
+				if not _factory_is_building:
+					_start_next_factory()
+			queue_redraw()
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			_placing_factory = false
+			$CommanderHUD.deactivate()
+			queue_redraw()
+
+func _factory_overlaps(pos: Vector2) -> bool:
+	for fpos in _factory_positions:
+		if pos.distance_to(fpos) < FACTORY_SIZE:
+			return true
+	if _factory_is_building and pos.distance_to(_factory_building_pos) < FACTORY_SIZE:
+		return true
+	for fpos in _factory_queue:
+		if pos.distance_to(fpos) < FACTORY_SIZE:
+			return true
+	return false
+
+func _factory_stop_pos(fpos: Vector2) -> Vector2:
+	var dir := (_p1 as Node2D).position - fpos
+	if dir.length_squared() > 1.0:
+		return fpos + dir.normalized() * (FACTORY_RADIUS * 0.7)
+	return fpos + Vector2.RIGHT * (FACTORY_RADIUS * 0.7)
+
+func _start_next_factory() -> void:
+	if _factory_queue.is_empty():
+		return
+	_factory_building_pos = _factory_queue[0]
+	_factory_queue.remove_at(0)
+	_factory_is_building = true
+	_factory_build_progress = 0.0
+	(_p1 as Node2D).call("move_to", _factory_stop_pos(_factory_building_pos))
+
 func _cancel_placement() -> void:
 	_placing_resource = false
+	_placing_factory  = false
 	_snap_resource_idx = -1
 	_pending_claim_idx = -1
 	_pending_keep_placing = false

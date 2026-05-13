@@ -5,7 +5,7 @@ signal build_selected(name: String)
 const BUILDINGS := [
 	{"name": "Metal\nExtractor", "color": Color(0.15, 0.55, 1.00), "locked": false},
 	{"name": "Power\nGenerator", "color": Color(0.70, 0.60, 0.05), "locked": false},
-	{"name": "Factory",          "color": Color(0.25, 0.40, 0.70), "locked": true},
+	{"name": "Factory",          "color": Color(0.25, 0.40, 0.70), "locked": false, "icon": "res://icon/Tank Factory.png"},
 	{"name": "Turret",           "color": Color(0.60, 0.20, 0.20), "locked": true},
 	{"name": "Shield\nGen",      "color": Color(0.15, 0.55, 0.45), "locked": true},
 	{"name": "Radar",            "color": Color(0.40, 0.20, 0.65), "locked": true},
@@ -84,6 +84,14 @@ func _make_button(b: Dictionary) -> Control:
 		var icon := preload("res://scripts/resource_icon.gd").new()
 		icon.custom_minimum_size = Vector2(58, 58)
 		icon.is_locked = locked
+		icon_wrap.add_child(icon)
+	elif b.has("icon"):
+		var icon := TextureRect.new()
+		icon.custom_minimum_size = Vector2(58, 58)
+		icon.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.texture = load(b["icon"])
+		icon.modulate = Color(1, 1, 1, 0.4) if locked else Color.WHITE
 		icon_wrap.add_child(icon)
 	else:
 		var icon := ColorRect.new()
