@@ -1,12 +1,25 @@
-[gd_scene load_steps=5 format=3 uid="uid://cmain000001"]
+[gd_scene load_steps=9 format=3 uid="uid://cmain000001"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/game_camera.gd" id="2_camera"]
 [ext_resource type="Script" path="res://scripts/selection_box.gd" id="3_selbox"]
 [ext_resource type="Script" path="res://scripts/commander_hud.gd" id="4_hud"]
+[ext_resource type="Script" path="res://scripts/managers/resource_manager.gd" id="5_res"]
+[ext_resource type="Script" path="res://scripts/managers/factory_manager.gd" id="6_fac"]
+[ext_resource type="Script" path="res://scripts/managers/selection_controller.gd" id="7_sel"]
+[ext_resource type="Script" path="res://scripts/factory_hud.gd" id="8_fhud"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
+
+[node name="ResourceManager" type="Node2D" parent="."]
+script = ExtResource("5_res")
+
+[node name="FactoryManager" type="Node2D" parent="."]
+script = ExtResource("6_fac")
+
+[node name="SelectionController" type="Node" parent="."]
+script = ExtResource("7_sel")
 
 [node name="Units" type="Node2D" parent="."]
 
@@ -21,3 +34,6 @@ script = ExtResource("3_selbox")
 
 [node name="CommanderHUD" type="CanvasLayer" parent="."]
 script = ExtResource("4_hud")
+
+[node name="FactoryHUD" type="CanvasLayer" parent="."]
+script = ExtResource("8_fhud")
