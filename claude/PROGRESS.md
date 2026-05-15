@@ -56,12 +56,24 @@
 - 他プレイヤーのコマンダーを赤い正方形でリアルタイム表示
 - プレイヤーの入退室を検知してスポーン／削除
 
+## コードリファクタ（2026-05-15）
+
+- `scripts/main.gd` を大幅整理、マネージャー3つに分離
+- `scripts/managers/factory_manager.gd` — Factory配置・建設・ユニット生産キュー
+- `scripts/managers/resource_manager.gd` — 資源スポット管理・Extractor配置
+- `scripts/managers/selection_controller.gd` — ドラッグ選択・ユニット移動
+- `scripts/factory_hud.gd` — Factory選択時のHUD
+- `scripts/units/unit.gd` — ユニット基底クラス（旧`scripts/unit.gd`）
+- `scripts/units/commander.gd` / `infantry.gd` / `tank.gd` — ユニット種別スクリプト
+- `scenes/units/commander.tscn` / `infantry.tscn` / `tank.tscn` — ユニットシーン
+- `claude/units.md` — ユニット仕様書追加
+
 ---
 
 ## 未実装（試作機2以降）
 
 - コマンダーのHP・攻撃
-- ファクトリーとユニット生産
+- ファクトリーからのユニット生産（infantry/tankスポーンロジック）
 - 資源の流入・消費（メタル / エネルギー）
 - ドラフトシステム
 - タイタンユニット

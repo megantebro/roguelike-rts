@@ -16,17 +16,23 @@ signal unit_selected(unit)
 
 var hp: float
 var selected := false
+var hovered := false
+var is_commander := false
 var _target: Vector2
 var _atk_cooldown := 0.0
 
 func _ready() -> void:
 	hp = hp_max
 	_target = position
+	mouse_entered.connect(func(): hovered = true; queue_redraw())
+	mouse_exited.connect(func(): hovered = false; queue_redraw())
 
 func _process(delta: float) -> void:
 	if position.distance_to(_target) > 1.0:
 		position = position.move_toward(_target, move_speed * delta)
 		queue_redraw()
+	var half := body_size / 2.0
+	position = position.clamp(Vector2(half, half), _MAP_SIZE - Vector2(half, half))
 	if _atk_cooldown > 0.0:
 		_atk_cooldown -= delta
 
@@ -39,6 +45,8 @@ func _draw() -> void:
 		draw_rect(rect, unit_color)
 	if selected:
 		draw_rect(rect, Color.WHITE, false, 2.0)
+	elif hovered:
+		draw_rect(rect, Color(1, 1, 1, 0.5), false, 2.0)
 
 func _input_event(_viewport: Viewport, event: InputEvent, _shape_idx: int) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
@@ -53,8 +61,11 @@ func deselect() -> void:
 	selected = false
 	queue_redraw()
 
+const _MAP_SIZE := Vector2(150 * 64, 150 * 64)
+
 func move_to(pos: Vector2) -> void:
-	_target = pos
+	var half := body_size / 2.0
+	_target = pos.clamp(Vector2(half, half), _MAP_SIZE - Vector2(half, half))
 
 func can_attack() -> bool:
 	return _atk_cooldown <= 0.0

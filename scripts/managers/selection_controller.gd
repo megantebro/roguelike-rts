@@ -16,10 +16,12 @@ func register_unit(unit: Node) -> void:
 	unit.unit_selected.connect(_on_unit_selected)
 
 func _on_unit_selected(unit) -> void:
-	deselect_all()
-	selected.append(unit)
-	unit.select()
-	main_node.commander_hud.show_hud()
+	if not Input.is_key_pressed(KEY_SHIFT):
+		deselect_all()
+	if not selected.has(unit):
+		selected.append(unit)
+		unit.select()
+	_update_hud()
 	_left_on_ground = false
 
 func deselect_all() -> void:
@@ -28,6 +30,18 @@ func deselect_all() -> void:
 	selected.clear()
 	main_node.cancel_all_placement()
 	main_node.commander_hud.hide_hud()
+
+func _has_commander() -> bool:
+	for u in selected:
+		if u.is_commander:
+			return true
+	return false
+
+func _update_hud() -> void:
+	if _has_commander():
+		main_node.commander_hud.show_hud()
+	else:
+		main_node.commander_hud.hide_hud()
 
 func has_selection() -> bool:
 	return not selected.is_empty()
@@ -65,10 +79,11 @@ func handle_drag_input(event: InputEvent) -> void:
 			main_node.selection_box.update_pos(event.position)
 
 func _select_in_rect(screen_rect: Rect2) -> void:
-	deselect_all()
+	if not Input.is_key_pressed(KEY_SHIFT):
+		deselect_all()
 	for unit in main_node.units_root.get_children():
 		if screen_rect.has_point(main_node.world_to_screen(unit.position)):
-			unit.select()
-			selected.append(unit)
-	if not selected.is_empty():
-		main_node.commander_hud.show_hud()
+			if not selected.has(unit):
+				unit.select()
+				selected.append(unit)
+	_update_hud()

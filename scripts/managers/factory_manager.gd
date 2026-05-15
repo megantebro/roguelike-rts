@@ -26,6 +26,7 @@ var building_pos := Vector2.ZERO
 var build_progress := 0.0
 
 var selected_idx := -1
+var _all_selected := false
 
 var _queues: Array = []                # parallel: each entry is Array[String]
 var _unit_progress: Array[float] = []
@@ -33,9 +34,17 @@ var _spawn_counts: Array[int] = []
 
 var _placing := false
 var _preview := Vector2.ZERO
+var _hovered_idx := -1
 
 func is_placing() -> bool:
 	return _placing
+
+func _process(_delta: float) -> void:
+	var mouse := get_global_mouse_position()
+	var h := factory_at(mouse)
+	if h != _hovered_idx:
+		_hovered_idx = h
+		queue_redraw()
 
 func start_placing() -> void:
 	_placing = true
@@ -56,23 +65,35 @@ func factory_at(world_pos: Vector2) -> int:
 func select_factory(idx: int) -> void:
 	if idx < 0 or idx >= positions.size():
 		return
+	_all_selected = false
 	selected_idx = idx
 	selection_changed.emit(idx)
 	queue_redraw()
 
-func deselect_factory() -> void:
-	if selected_idx < 0:
+func select_all_factories() -> void:
+	if positions.is_empty():
 		return
+	_all_selected = true
+	selected_idx = 0
+	selection_changed.emit(0)
+	queue_redraw()
+
+func deselect_factory() -> void:
+	if selected_idx < 0 and not _all_selected:
+		return
+	_all_selected = false
 	selected_idx = -1
 	selection_changed.emit(-1)
 	queue_redraw()
 
 func queue_unit_for_selected(unit_name: String) -> void:
-	if selected_idx < 0:
-		return
 	if not UNIT_SCENES.has(unit_name):
 		return
-	_queues[selected_idx].append(unit_name)
+	if _all_selected:
+		for i in positions.size():
+			(_queues[i] as Array).append(unit_name)
+	elif selected_idx >= 0:
+		(_queues[selected_idx] as Array).append(unit_name)
 	queue_redraw()
 
 func tick(delta: float, commander: Node2D) -> void:
@@ -132,6 +153,13 @@ func _spawn_unit_at(factory_idx: int, unit_name: String) -> void:
 	main_node.units_root.add_child(unit)
 	unit_spawned.emit(unit)
 
+func _invalid(pos: Vector2) -> bool:
+	var half := FACTORY_SIZE / 2.0
+	var map := float(150 * TILE_SIZE)
+	if pos.x - half < 0 or pos.x + half > map or pos.y - half < 0 or pos.y + half > map:
+		return true
+	return _overlaps(pos)
+
 func _overlaps(pos: Vector2) -> bool:
 	for fpos in positions:
 		if pos.distance_to(fpos) < FACTORY_SIZE:
@@ -149,10 +177,13 @@ func handle_placement_input(event: InputEvent) -> void:
 		queue_redraw()
 	elif event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
-			if not _overlaps(_preview):
+			if not _invalid(_preview):
 				build_queue.append(_preview)
 				if not is_building:
 					_start_next_build(main_node.commander)
+			if not event.shift_pressed:
+				cancel()
+				main_node.commander_hud.deactivate()
 			queue_redraw()
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			cancel()
@@ -172,13 +203,14 @@ func _draw() -> void:
 			draw_rect(Rect2(bar_x, bar_y, bar_w * (_unit_progress[i] / UNIT_BUILD_TIME), 6.0), Color(0.3, 0.8, 1.0))
 			for j in mini(q - 1, 8):
 				draw_circle(Vector2(bar_x + 5.0 + j * 10.0, bar_y - 8.0), 3.0, Color(0.5, 0.85, 1.0))
-		if i == selected_idx:
+		if _all_selected or i == selected_idx:
 			draw_rect(Rect2(fpos - Vector2(half + 2.0, half + 2.0), Vector2(FACTORY_SIZE + 4.0, FACTORY_SIZE + 4.0)), Color(1, 1, 1, 0.9), false, 3.0)
+		elif i == _hovered_idx:
+			draw_rect(Rect2(fpos - Vector2(half + 2.0, half + 2.0), Vector2(FACTORY_SIZE + 4.0, FACTORY_SIZE + 4.0)), Color(1, 1, 1, 0.5), false, 2.0)
 	if is_building:
 		draw_texture_rect(_texture, Rect2(building_pos - Vector2(half, half), Vector2(FACTORY_SIZE, FACTORY_SIZE)), false, Color(1, 1, 1, 0.5))
 	for fpos in build_queue:
 		draw_texture_rect(_texture, Rect2(fpos - Vector2(half, half), Vector2(FACTORY_SIZE, FACTORY_SIZE)), false, Color(1, 1, 1, 0.3))
 	if _placing:
-		var invalid := _overlaps(_preview)
-		var col := Color(1, 0.2, 0.2, 0.6) if invalid else Color(1, 1, 1, 0.6)
+		var col := Color(1, 0.2, 0.2, 0.6) if _invalid(_preview) else Color(1, 1, 1, 0.6)
 		draw_texture_rect(_texture, Rect2(_preview - Vector2(half, half), Vector2(FACTORY_SIZE, FACTORY_SIZE)), false, col)

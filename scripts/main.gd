@@ -84,7 +84,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		var fi := factories.factory_at(world)
 		if fi >= 0:
 			selection.deselect_all()
-			factories.select_factory(fi)
+			if event.double_click:
+				factories.select_all_factories()
+			else:
+				factories.select_factory(fi)
 			return
 		selection.start_drag_potential(event.position)
 	elif event.button_index == MOUSE_BUTTON_RIGHT:
